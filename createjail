@@ -1,0 +1,191 @@
+#!/bin/bash
+########################################################################
+#
+#
+#                       script: createjail
+#                   adapted by: Dan Purgert    
+#                      version: 0.1
+#                         date: Mon May  2 06:43:53 EDT 2016
+#                      purpose: Create a chroot jail environment for 
+#                             : guest ssh and sftp users.  Will allow
+#                             : basic commands (bash, ls, cp, mv, mkdir,
+#                             : clear) to the user.
+#
+#                      license: GPL v2 (only)
+#                   repository: http://github.com/dpurgert
+#
+#
+########################################################################
+
+#This program is free software; you can redistribute it and/or
+#modify it under the terms of the GNU General Public License
+#as published by the Free Software Foundation; either version 2
+#of the License, or (at your option) any later version.
+#
+#This program is distributed in the hope that it will be useful,
+#but WITHOUT ANY WARRANTY; without even the implied warranty of
+#MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+#GNU General Public License for more details.
+#
+#You should have received a copy of the GNU General Public License
+#along with this program; if not, write to the Free Software
+#Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA
+#02110-1301, USA.
+
+VERSION="0.1"
+GPL="http://www.gnu.org/licenses/old-licenses/gpl-2.0.en.html#SEC3"
+
+while getopts ":h" opt; do
+case $opt in 
+ a) printf " 
+     createjail
+     ----------
+     This script is intended to help in initializing a chroot jail for
+     ssh and sftp accounts on a server.
+
+     OPTIONS:
+      -h Print this help and exit
+
+     USAGE:
+      createjail /jail/base /path/to/cmd [...]
+     ----------"
+     exit 0
+     break ;;
+esac
+done
+
+if [[ $EUID -ne 0 ]] ; then 
+
+  printf "   This script will require root permissions to perform 
+   several tasks related to creating the chroot environment.\n"
+
+  read -n 1 -p "Proceed with allowing root commands? [Y|n]" "chk"
+
+  if [[ "$chk" =~ [n|N] ]] ; then
+    printf "\n\n   Root permissions denied.  Exiting.\n"
+    exit 0
+  fi
+else #running as root.  this is bad.
+   printf "\n\n===================WARNING!!!====================\n"
+   printf "Detected script being run as root user.  It is not\n"
+   printf "advisable to do so, as any errors in this script,\n"
+   printf "or in the commands that do not require elevated\n"
+   printf "privileges can potentially harm your system.\n\n"
+   printf "This script is designed to only elevate your user\n"
+   printf "priveleges for the command(s) that require it, and\n"
+   printf "then drop back to your standard user.\n\n"
+   printf "Exiting.\n"
+   exit 1
+fi
+
+
+
+BASE=$1
+
+#Copy Libs function. 
+#Original script (C) 2006 nixCraft <http://www.cyberciti.biz/tips/>
+copylibs() {
+  
+  
+  #get list of depends, and copy them over
+  local FILES="$(ldd $1 | awk '{ print $3 }' | egrep -v ^'\(')"
+  
+  for i in $FILES
+  do
+    local d="$(dirname $i)"
+    [ ! -d $BASE$d ] && sudo mkdir -p $BASE$d 
+    sudo /bin/cp $1 $BASE$d
+  done
+ 
+  # copy /lib/ld-linux* or /lib64/ld-linux* to $BASE/$sldlsubdir
+  local sldl="$(ldd $1 | grep 'ld-linux' | awk '{ print $1 }')" 
+  local sldlsubd="$(dirname $sldl)"
+
+  if [ ! -f $BASE$sldl ] ; then 
+    sudo /bin/cp $sldl $BASE$sldlsubd
+  fi
+}
+
+#Ensure that the user typed things correctly
+printf "\n\nJail base directory is $BASE.\n"
+read -n 1 -p "Is this correct? [Y|n]" "chk"
+
+if [[ "$chk" =~ [n|N] ]] ; then
+  printf "\n\nExiting.\n\n"
+  exit 0
+fi
+
+
+#create the base dir if it doesn't already exist
+[ ! -d $BASE ] && sudo mkdir -p $BASE 
+
+
+#create the rest of the jail directory structure
+sudo mkdir -p $BASE/{dev,etc,lib,lib64,usr,bin,home}
+sudo mkdir -p $BASE/usr/bin
+
+sudo chown root:root $BASE
+sudo chmod 755 $BASE
+
+sudo cd $BASE
+
+while [ $# -gt 0 ]
+do
+  shift #skip the first element, since that's the basedir
+
+  if [ "$1" = '' ] ; then 
+    #we're done.  
+    #TODO - figure out why it adds an empty element to the end.
+    break
+  fi
+
+  instdir="$(dirname $1 | sed 's\^/\\')"
+  cdir="$(pwd)"
+  printf "\nInstalling $1 to $BASE/$instdir\n\n"
+  if [ ! "$BASE/$instdir" = "$cdir" ] ; then
+    cd $BASE/$instdir
+  fi
+  pwd
+  sudo cp $1 $(pwd)
+  copylibs $1
+
+  #clear needs some extra bits
+  if [ $(basename "$1") = "clear" ] ; then
+    cd $BASE/lib
+    sudo cp -r /lib/terminfo $(pwd)
+  fi
+done
+
+printf "Basic chroot operations complete.\n"
+read -n 1 -p "Create \"jailed\" group? [y|N]" "chk"
+
+if [[ "$chk" =~ [y|Y] ]] ; then
+  printf "\n\nCreating new group \"jailed\".\n\n"
+  sudo groupadd jailed
+else
+  printf "\n\n\"jailed\" group NOT created.\n\n"
+fi
+clear
+printf " All scripted operations complete.  You will need to do the
+ following things manually:
+  1. Create users.
+    - either via \"sudo adduser --home $BASE/home/user newuser\" OR
+    - copy an existing user's /home/user directory to $BASE/home 
+    - NOTE: If you use the first option, fix /etc/passwd to reflect
+       their home as /home/user, rather than $BASE/home/user.
+  
+  2. (optional) Create group and add users
+    - \"sudo groupadd jail_group\" to create the group
+    - \"sudo addgroup user jail_group\" to add a user to it
+
+  3. Amend /etc/ssh/sshd_config to work with chrooted jails.  Add the 
+     following directives to the bottom of the file:
+     
+     Match [User user|Group jailed]
+         ChrootDirectory $BASE
+         X11Forwarding no
+         AllowTcpForwarding no
+         AuthorizedKeysFile $BASE/%u/.ssh/authorized_keys
+
+    OPTIONAL -- if you want to ONLY allow sftp access, add this:
+         ForceCommand internal-sftp\n"
