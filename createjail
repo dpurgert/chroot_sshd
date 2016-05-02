@@ -3,7 +3,7 @@
 #
 #
 #                       script: createjail
-#                   adapted by: Dan Purgert    
+#                   adapted by: Dan Purgert <dan@djph.net>    
 #                      version: 0.1
 #                         date: Mon May  2 06:43:53 EDT 2016
 #                      purpose: Create a chroot jail environment for 
@@ -16,6 +16,8 @@
 #
 #
 ########################################################################
+
+#Copyright (C) 2016 Dan Purgert <dan@djph.net>
 
 #This program is free software; you can redistribute it and/or
 #modify it under the terms of the GNU General Public License
@@ -37,7 +39,7 @@ GPL="http://www.gnu.org/licenses/old-licenses/gpl-2.0.en.html#SEC3"
 
 while getopts ":h" opt; do
 case $opt in 
- a) printf " 
+ h) printf " 
      createjail
      ----------
      This script is intended to help in initializing a chroot jail for
@@ -48,9 +50,9 @@ case $opt in
 
      USAGE:
       createjail /jail/base /path/to/cmd [...]
-     ----------"
+     ----------\n\n"
      exit 0
-     break ;;
+     ;;
 esac
 done
 
@@ -83,10 +85,8 @@ fi
 BASE=$1
 
 #Copy Libs function. 
-#Original script (C) 2006 nixCraft <http://www.cyberciti.biz/tips/>
 copylibs() {
-  
-  
+  #Original script (C) 2006 nixCraft <http://www.cyberciti.biz/tips/>
   #get list of depends, and copy them over
   local FILES="$(ldd $1 | awk '{ print $3 }' | egrep -v ^'\(')"
   
@@ -105,9 +105,17 @@ copylibs() {
     sudo /bin/cp $sldl $BASE$sldlsubd
   fi
 }
+#End copylibs / nixCraft code.
 
-#Ensure that the user typed things correctly
-printf "\n\nJail base directory is $BASE.\n"
+printf "\n\n\n\n
+Chroot helper version $VERSION, Copyright (C) 2016 Dan Purgert.
+This program comes with ABSOLUTELY NO WARRANTY; for details see the GNU
+GPL.  This is free software, and you are welcome to redistribute it
+under certain conditions; see:\n$GPL\n for details.\n\n\n\n"
+
+read -n 1 -p "Press any key to continue."
+clear
+printf "\n\n\n\n\nJail base directory is $BASE.\n"
 read -n 1 -p "Is this correct? [Y|n]" "chk"
 
 if [[ "$chk" =~ [n|N] ]] ; then
